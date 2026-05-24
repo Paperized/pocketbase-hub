@@ -1,0 +1,30 @@
+http:
+  routers:
+    __PROJECT_NAME__-root:
+      rule: "Host(`__SUBDOMAIN__.__APP_DOMAIN__`) && Path(`/`)"
+      entrypoints:
+        - web
+      middlewares:
+        - __PROJECT_NAME__-redirect-admin
+      service: __PROJECT_NAME__
+      priority: 20
+
+    __PROJECT_NAME__:
+      rule: "Host(`__SUBDOMAIN__.__APP_DOMAIN__`)"
+      entrypoints:
+        - web
+      service: __PROJECT_NAME__
+      priority: 10
+
+  middlewares:
+    __PROJECT_NAME__-redirect-admin:
+      redirectRegex:
+        regex: "^https?://[^/]+/?$"
+        replacement: "https://__SUBDOMAIN__.__APP_DOMAIN__/_/"
+        permanent: false
+
+  services:
+    __PROJECT_NAME__:
+      loadBalancer:
+        servers:
+          - url: "http://pb___PROJECT_NAME__:8090"

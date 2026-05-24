@@ -1,0 +1,105 @@
+services:
+  # Postgres 17 — required by fondoger/pocketbase (uses json_query added in PG17)
+  postgres:
+    image: postgres:17-alpine
+    container_name: pocket-hub-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - pb_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Socket proxy — limits Docker API access to only what the dashboard needs
+  socket-proxy:
+    image: tecnativa/docker-socket-proxy:latest
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      CONTAINERS: 1
+      NETWORKS: 1
+      IMAGES: 1
+      SERVICES: 1
+      POST: 1
+      DELETE: 1
+    networks:
+      - socket_net
+    read_only: true
+    tmpfs:
+      - /run
+      - /tmp
+
+  # Internal Traefik — routes *.pocket-hub.domain.com → correct PocketBase container
+  # Your public reverse proxy (Traefik/Nginx/Caddy) should forward to port 8082
+  traefik:
+    image: traefik:v3.0
+    restart: unless-stopped
+    container_name: pocket-hub-traefik
+    command:
+      - "--providers.file.directory=/dynamic"
+      - "--providers.file.watch=true"
+      - "--entrypoints.web.address=:8082"
+      - "--api.dashboard=true"
+      - "--api.insecure=true"
+      - "--log.level=INFO"
+    ports:
+      - "127.0.0.1:8082:8082"
+      - "127.0.0.1:8083:8080"   # Traefik dashboard (optional, debug)
+    volumes:
+      - ./traefik/dynamic:/dynamic:ro
+    networks:
+      - demo_net
+      - pb_network
+      - traefik-public
+
+  dashboard:
+    image: pocket-base-hub:latest
+    restart: unless-stopped
+    user: "1001:1001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      socket-proxy:
+        condition: service_started
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN}
+      APP_SCHEME: https
+      DASHBOARD_USER: ${DASHBOARD_USER}
+      DASHBOARD_PASS: ${DASHBOARD_PASS}
+      POSTGRES_HOST: pocket-hub-postgres
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      INSTANCES_DIR: /instances
+      TRAEFIK_DYNAMIC_DIR: /traefik/dynamic
+      DOCKER_HOST: tcp://socket-proxy:2375
+      PORT: 3000
+    volumes:
+      - ./instances:/instances
+      - ./traefik/dynamic:/traefik/dynamic
+    networks:
+      - demo_net
+      - socket_net
+      - pb_network
+
+volumes:
+  postgres_data:
+
+networks:
+  demo_net:
+    driver: bridge
+  socket_net:
+    internal: true
+  pb_network:
+    name: pb_network
+    driver: bridge
+  traefik-public:
+    external: true

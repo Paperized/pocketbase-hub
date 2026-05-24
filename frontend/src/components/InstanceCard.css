@@ -1,0 +1,137 @@
+.instance-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  transition: border-color 0.15s, opacity 0.3s;
+}
+
+.instance-card:hover {
+  border-color: var(--accent);
+}
+
+.instance-card.deleting {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.card-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  word-break: break-all;
+}
+
+.status-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 99px;
+  white-space: nowrap;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.status-running {
+  background: rgba(76, 175, 130, 0.15);
+  color: var(--green);
+  border: 1px solid rgba(76, 175, 130, 0.3);
+}
+
+.status-restarting {
+  background: rgba(108, 99, 255, 0.15);
+  color: var(--accent);
+  border: 1px solid rgba(108, 99, 255, 0.3);
+}
+
+.status-exited {
+  background: rgba(224, 164, 74, 0.15);
+  color: var(--yellow);
+  border: 1px solid rgba(224, 164, 74, 0.3);
+}
+
+.status-unknown {
+  background: rgba(123, 128, 160, 0.15);
+  color: var(--text-muted);
+  border: 1px solid rgba(123, 128, 160, 0.2);
+}
+
+.card-url {
+  font-size: 12px;
+  color: var(--accent);
+  text-decoration: none;
+  word-break: break-all;
+}
+
+.card-url:hover {
+  text-decoration: underline;
+}
+
+.card-error {
+  font-size: 12px;
+  color: var(--danger);
+}
+
+.card-actions {
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+}
+
+.btn-danger-outline {
+  background: transparent;
+  border: 1px solid rgba(224, 92, 92, 0.4);
+  color: var(--danger);
+  font-size: 13px;
+  padding: 6px 14px;
+}
+
+.btn-danger-outline:hover:not(:disabled) {
+  background: rgba(224, 92, 92, 0.1);
+  border-color: var(--danger);
+}
+
+.btn-danger {
+  background: var(--danger);
+  color: #fff;
+  font-size: 13px;
+  padding: 6px 14px;
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: var(--danger-hover);
+}
+
+.btn-secondary {
+  background: var(--surface2);
+  color: var(--text-muted);
+  font-size: 13px;
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--text-muted);
+}
+
+.confirm-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.confirm-text {
+  font-size: 13px;
+  color: var(--text-muted);
+}

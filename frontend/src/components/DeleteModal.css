@@ -1,0 +1,93 @@
+/* Reuses modal-backdrop, modal, modal-header, modal-body, modal-footer,
+   modal-close, btn-secondary, btn-danger from CreateModal.css + global styles.
+   Only delete-specific overrides here. */
+
+.delete-modal {
+  max-width: 460px;
+}
+
+.delete-warning {
+  display: flex;
+  gap: 12px;
+  background: rgba(224, 92, 92, 0.07);
+  border: 1px solid rgba(224, 92, 92, 0.25);
+  border-radius: 8px;
+  padding: 14px;
+}
+
+.warning-icon {
+  font-size: 18px;
+  line-height: 1.2;
+  flex-shrink: 0;
+  color: var(--danger);
+}
+
+.warning-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--danger);
+  margin-bottom: 4px;
+}
+
+.warning-body {
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.warning-body strong {
+  color: var(--text);
+}
+
+.checkbox-row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  cursor: pointer;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.checkbox-row:hover {
+  border-color: var(--danger);
+  background: rgba(224, 92, 92, 0.04);
+}
+
+.checkbox-row input[type="checkbox"] {
+  margin-top: 2px;
+  accent-color: var(--danger);
+  flex-shrink: 0;
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+}
+
+.checkbox-label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.checkbox-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.checkbox-desc {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.checkbox-desc code {
+  font-family: monospace;
+  font-size: 11px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 1px 4px;
+  color: var(--text);
+}

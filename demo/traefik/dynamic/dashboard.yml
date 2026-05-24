@@ -1,0 +1,14 @@
+http:
+  routers:
+    dashboard:
+      rule: "Host(`pocket-hub.domain.com`)"
+      entrypoints:
+        - web
+      service: dashboard
+      priority: 1
+
+  services:
+    dashboard:
+      loadBalancer:
+        servers:
+          - url: "http://dashboard:3000"

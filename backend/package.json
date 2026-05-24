@@ -1,0 +1,11 @@
+{
+  "name": "pocket-base-hub-backend",
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "bun run --watch index.ts",
+    "start": "bun run index.ts"
+  },
+  "dependencies": {
+    "hono": "^4.4.0"
+  }
+}

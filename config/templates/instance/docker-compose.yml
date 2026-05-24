@@ -1,0 +1,14 @@
+services:
+  pocketbase:
+    image: ghcr.io/fondoger/pocketbase:latest
+    restart: unless-stopped
+    container_name: pb___PROJECT_NAME__
+    env_file: .env
+    volumes:
+      - ./pb-data:/data
+    networks:
+      - pb_network
+
+networks:
+  pb_network:
+    external: true

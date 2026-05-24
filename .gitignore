@@ -1,0 +1,21 @@
+# Dependencies
+node_modules/
+
+# Build output
+frontend/dist/
+backend/dist/
+
+# Runtime data — instance files created at runtime (keep dirs, ignore contents)
+demo/instances/*
+!demo/instances/.gitkeep
+demo/traefik/dynamic/*
+!demo/traefik/dynamic/dashboard.yml
+
+# Environment files — copy .env.example to .env and fill in values
+demo/.env
+
+# OS / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/
