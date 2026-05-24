@@ -72,8 +72,6 @@ services:
       # Matches both the base domain and any subdomain — one rule covers all instances
       - "traefik.http.routers.pocket-hub.rule=HostRegexp(`^([a-z0-9-]+\\.)?${APP_DOMAIN}$$`)"
       - "traefik.http.routers.pocket-hub.entrypoints=websecure"
-      - "traefik.http.routers.pocket-hub.tls=true"
-      - "traefik.http.routers.pocket-hub.tls.certresolver=${CERT_RESOLVER}"
       # Port 8082 is the internal Traefik entrypoint defined in --entrypoints.web.address
       - "traefik.http.services.pocket-hub.loadbalancer.server.port=8082"
     networks:
@@ -82,7 +80,7 @@ services:
       - traefik-public
 
   dashboard:
-    image: pocket-base-hub:latest
+    image: ghcr.io/paperized/pocketbase-hub:latest
     restart: unless-stopped
     user: "1001:1001"
     depends_on:

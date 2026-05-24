@@ -36,13 +36,14 @@ The `demo/` folder is a ready-to-run Docker Compose stack: Postgres 17, internal
 
 ### Steps
 
-**1. Clone and build**
+**1. Clone and start**
 
 ```bash
 git clone https://github.com/Paperized/pocketbase-hub.git
 cd pocketbase-hub
-docker build -t pocket-base-hub:latest .
 ```
+
+> The `demo/docker-compose.yml` pulls the pre-built image from `ghcr.io/paperized/pocketbase-hub:latest` automatically — no local build needed.
 
 **2. Configure environment**
 
@@ -60,8 +61,6 @@ DASHBOARD_PASS=changeme
 
 POSTGRES_USER=postgres
 POSTGRES_PASSWORD=a_strong_random_password
-
-CERT_RESOLVER=letsencrypt   # only needed if using Traefik (see below)
 ```
 
 **3. Update the dashboard route**
@@ -90,30 +89,30 @@ The internal Traefik router listens on `127.0.0.1:8082` (HTTP only). Your public
 
 ### Option A — Traefik (recommended, works out of the box)
 
-If you already run Traefik as your public reverse proxy with Docker auto-discovery, the setup is zero-config: the labels in `docker-compose.yml` automatically register the routing rules and request a wildcard TLS certificate.
+If you already run Traefik as your public reverse proxy with Docker auto-discovery, the setup is zero-config: the labels in `docker-compose.yml` automatically register the routing rules with your public Traefik.
 
 **How it works:**
 - Your public Traefik watches the Docker socket for containers with `traefik.enable=true`
-- `pocket-hub-traefik` exposes labels that define the routing rule and cert resolver
+- `pocket-hub-traefik` exposes labels that define the routing rule
 - Traefik reaches `pocket-hub-traefik` via the shared `traefik-public` Docker network
+- TLS termination is handled entirely by your public Traefik — this stack does not manage certificates
 
 **Requirements:**
-1. Your public Traefik must be connected to a Docker network named `traefik-public`:
+1. Your public Traefik must be connected to a Docker network named `traefik-public` and use the Docker provider (`--providers.docker=true`) with `exposedByDefault: false`:
    ```bash
    docker network create traefik-public
    ```
-2. Your public Traefik must use the Docker provider (`--providers.docker=true`) with `exposedByDefault: false`
-3. Set `CERT_RESOLVER` in `demo/.env` to the name of your Let's Encrypt resolver (e.g. `letsencrypt`, `cloudflare`)
+2. Your public Traefik must already handle TLS on the `websecure` entrypoint (port 443) — via a wildcard cert, Let's Encrypt, or any other method you already have configured. This stack does not touch certificates.
 
-The relevant label in `docker-compose.yml`:
+The relevant labels in `docker-compose.yml`:
 ```yaml
 # Matches both pocket-hub.domain.com AND *.pocket-hub.domain.com in one rule
 - "traefik.http.routers.pocket-hub.rule=HostRegexp(`^([a-z0-9-]+\\.)?${APP_DOMAIN}$$`)"
-- "traefik.http.routers.pocket-hub.tls.certresolver=${CERT_RESOLVER}"
+- "traefik.http.routers.pocket-hub.entrypoints=websecure"
 - "traefik.http.services.pocket-hub.loadbalancer.server.port=8082"
 ```
 
-The single `HostRegexp` rule covers the base domain and all subdomains — no need to add new rules when new instances are created.
+The single `HostRegexp` covers the base domain and all subdomains — no rule updates needed when new instances are created.
 
 ### Option B — Nginx
 
@@ -413,20 +412,20 @@ All endpoints require HTTP Basic Auth (if `DASHBOARD_USER` is set).
 
 ## Building the Image
 
+The image is published automatically to `ghcr.io/paperized/pocketbase-hub:latest` on every push to `main` via GitHub Actions. You can also trigger a build manually from the **Actions** tab on GitHub.
+
+To build locally (e.g. after forking or modifying the source):
+
 ```bash
 docker build -t pocket-base-hub:latest .
 ```
-
-Two-stage build:
-1. **`node:20-alpine`** — builds the React/Vite frontend
-2. **`oven/bun:1-alpine`** — runtime, installs `bash`, `openssl`, `postgresql16-client`, `docker-cli`, `docker-cli-compose`
 
 ---
 
 ## Production Notes
 
 - **PostgreSQL 17 required.** `fondoger/pocketbase` uses `json_query(jsonb, text)` added in PG17.
-- **Wildcard TLS certificate.** Your reverse proxy needs a cert covering `*.pocket-hub.domain.com`. With Traefik + Let's Encrypt, use DNS-01 challenge (required for wildcards).
+- **Wildcard TLS certificate.** Your public reverse proxy needs a cert covering `*.pocket-hub.domain.com`. This stack does not manage certificates — TLS is terminated upstream before traffic reaches the internal Traefik.
 - **UID 1001.** Adjust `user:` in `docker-compose.yml` to match your host user UID (`id -u`).
 - **Customizing without rebuilding.** Mount volumes over `/config/scripts` or `/config/templates` to override provisioning behavior.
 - **Superuser credentials** are shown once in the UI after instance creation and are not stored anywhere by the hub. Save them immediately.
