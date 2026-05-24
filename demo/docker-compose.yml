@@ -79,6 +79,17 @@ services:
       - pb_network
       - traefik-public
 
+  # Init — ensures bind-mount dirs exist with correct ownership (1001:1001)
+  # before the dashboard starts. Runs once and exits.
+  init-dirs:
+    image: alpine:3
+    user: root
+    command: ["sh", "-c", "mkdir -p /instances /traefik/dynamic && chown -R 1001:1001 /instances /traefik"]
+    volumes:
+      - ./instances:/instances
+      - ./traefik:/traefik
+    restart: "no"
+
   dashboard:
     image: ghcr.io/paperized/pocketbase-hub:latest
     restart: unless-stopped
@@ -88,6 +99,8 @@ services:
         condition: service_healthy
       socket-proxy:
         condition: service_started
+      init-dirs:
+        condition: service_completed_successfully
     environment:
       APP_DOMAIN: ${APP_DOMAIN}
       APP_SCHEME: https
