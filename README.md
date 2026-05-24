@@ -422,6 +422,15 @@ docker build -t pocket-base-hub:latest .
 
 ---
 
+## Acknowledgements
+
+This project stands on the shoulders of two great open-source efforts:
+
+- **[pocketbase/pocketbase](https://github.com/pocketbase/pocketbase)** — the original, excellent open-source backend-as-a-service that PocketBase Hub is built to manage.
+- **[fondoger/pocketbase](https://github.com/fondoger/pocketbase)** — a community fork that adds native **PostgreSQL support** to PocketBase. Without this fork, running isolated PocketBase instances on a shared Postgres 17 cluster would not be possible. Huge thanks to [@fondoger](https://github.com/fondoger) for this work.
+
+---
+
 ## Production Notes
 
 - **PostgreSQL 17 required.** `fondoger/pocketbase` uses `json_query(jsonb, text)` added in PG17.
