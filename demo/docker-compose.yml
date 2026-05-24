@@ -38,8 +38,18 @@ services:
       - /run
       - /tmp
 
-  # Internal Traefik — routes *.pocket-hub.domain.com → correct PocketBase container
-  # Your public reverse proxy (Traefik/Nginx/Caddy) should forward to port 8082
+  # Internal Traefik — routes *.${APP_DOMAIN} to the correct PocketBase container
+  # using the file provider (hot-reload on /dynamic/*.yml changes).
+  #
+  # Traefik auto-discovery (recommended):
+  #   - Attach your public Traefik to the external "traefik-public" network.
+  #   - The labels below automatically register this service with your public
+  #     Traefik so that *.${APP_DOMAIN} is routed here with TLS termination.
+  #   - Create the network once: docker network create traefik-public
+  #
+  # Manual / other reverse proxies:
+  #   - Remove the labels block and the traefik-public network entries.
+  #   - Forward *.${APP_DOMAIN} to 127.0.0.1:8082 from Nginx/Caddy/etc.
   traefik:
     image: traefik:v3.0
     restart: unless-stopped
@@ -56,6 +66,16 @@ services:
       - "127.0.0.1:8083:8080"   # Traefik dashboard (optional, debug)
     volumes:
       - ./traefik/dynamic:/dynamic:ro
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-public"
+      # Matches both the base domain and any subdomain — one rule covers all instances
+      - "traefik.http.routers.pocket-hub.rule=HostRegexp(`^([a-z0-9-]+\\.)?${APP_DOMAIN}$$`)"
+      - "traefik.http.routers.pocket-hub.entrypoints=websecure"
+      - "traefik.http.routers.pocket-hub.tls=true"
+      - "traefik.http.routers.pocket-hub.tls.certresolver=${CERT_RESOLVER}"
+      # Port 8082 is the internal Traefik entrypoint defined in --entrypoints.web.address
+      - "traefik.http.services.pocket-hub.loadbalancer.server.port=8082"
     networks:
       - demo_net
       - pb_network
@@ -101,5 +121,9 @@ networks:
   pb_network:
     name: pb_network
     driver: bridge
+  # External network shared with your public Traefik.
+  # Required for Traefik auto-discovery via labels.
+  # Create with: docker network create traefik-public
+  # Remove this block (and the traefik service's network entry) if not using Traefik.
   traefik-public:
     external: true

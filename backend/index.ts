@@ -11,9 +11,9 @@ app.use('*', logger())
 // Health check — no auth required
 app.get('/health', (c) => c.json({ ok: true }))
 
-// API — protected by basic auth
-const user = process.env.DASHBOARD_USER || 'admin'
-const pass = process.env.DASHBOARD_PASS || 'changeme'
+// API — protected by basic auth (disabled if DASHBOARD_USER is empty)
+const user = process.env.DASHBOARD_USER ?? 'admin'
+const pass = process.env.DASHBOARD_PASS ?? 'changeme'
 
 app.use('/api/*', basicAuth(user, pass))
 app.get('/api/config', (c) => c.json({

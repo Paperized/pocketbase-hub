@@ -1,7 +1,12 @@
 import { Context, Next } from 'hono'
 
 export function basicAuth(user: string, pass: string) {
+  // If no user is configured, auth is disabled — all requests pass through
+  const enabled = user.trim() !== ''
+
   return async (c: Context, next: Next) => {
+    if (!enabled) return next()
+
     const header = c.req.header('Authorization') || ''
 
     if (header.startsWith('Basic ')) {

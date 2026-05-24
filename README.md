@@ -2,103 +2,149 @@
 
 A self-hosted dashboard to spin up and manage multiple [PocketBase](https://pocketbase.io) instances from a single UI. Each instance gets its own subdomain, PostgreSQL databases, and admin credentials — all provisioned automatically.
 
-![Dashboard UI](https://raw.githubusercontent.com/Paperized/pocketbase-hub/main/docs/preview.png)
-
 ---
 
 ## Table of Contents
 
 - [Quick Start (Demo)](#quick-start-demo)
+- [Reverse Proxy Setup](#reverse-proxy-setup)
 - [Architecture Overview](#architecture-overview)
+- [Instance Lifecycle & Ownership](#instance-lifecycle--ownership)
+- [Dashboard Authentication](#dashboard-authentication)
 - [Project Structure](#project-structure)
 - [Configuration Reference](#configuration-reference)
 - [Templates & Placeholders](#templates--placeholders)
 - [Scripts Reference](#scripts-reference)
 - [API Reference](#api-reference)
 - [Building the Image](#building-the-image)
-- [Production Deployment Notes](#production-deployment-notes)
+- [Production Notes](#production-notes)
 
 ---
 
 ## Quick Start (Demo)
 
-The `demo/` folder contains a ready-to-run Docker Compose stack. Everything is included: Postgres 17, an internal Traefik router, the Docker socket proxy, and the dashboard itself.
+The `demo/` folder is a ready-to-run Docker Compose stack: Postgres 17, internal Traefik router, Docker socket proxy, and the dashboard.
 
 ### Prerequisites
 
 - Docker + Docker Compose v2
-- A domain with wildcard DNS configured:
-  - `pocket-hub.domain.com` → your server IP
-  - `*.pocket-hub.domain.com` → your server IP
-- A reverse proxy (Traefik, Nginx, Caddy…) already running on the host, able to forward HTTPS traffic to `127.0.0.1:8082`
-- A Docker network named `traefik-public` shared with your reverse proxy:
-  ```bash
-  docker network create traefik-public
-  ```
-- The host user running the dashboard must have UID `1001` (or change the `user:` field in `demo/docker-compose.yml` to match your own UID/GID):
-  ```bash
-  id -u   # should print 1001
-  ```
+- Wildcard DNS pointing to your server:
+  - `pocket-hub.domain.com` → server IP
+  - `*.pocket-hub.domain.com` → server IP
+- A reverse proxy handling TLS termination (see [Reverse Proxy Setup](#reverse-proxy-setup))
+- Host user UID `1001` (or adjust `user:` in `demo/docker-compose.yml` to match `id -u`)
 
 ### Steps
 
-**1. Clone the repository**
+**1. Clone and build**
 
 ```bash
 git clone https://github.com/Paperized/pocketbase-hub.git
 cd pocketbase-hub
-```
-
-**2. Build the Docker image**
-
-```bash
 docker build -t pocket-base-hub:latest .
 ```
 
-**3. Configure the demo environment**
+**2. Configure environment**
 
 ```bash
 cp demo/.env.example demo/.env
 ```
 
-Edit `demo/.env`:
+Edit `demo/.env` with your values:
 
 ```env
-# The base domain — instances will be at <subdomain>.pocket-hub.domain.com
 APP_DOMAIN=pocket-hub.domain.com
 
-# Dashboard login (HTTP Basic Auth)
-DASHBOARD_USER=admin
+DASHBOARD_USER=admin        # leave empty to disable auth
 DASHBOARD_PASS=changeme
 
-# PostgreSQL credentials
 POSTGRES_USER=postgres
 POSTGRES_PASSWORD=a_strong_random_password
+
+CERT_RESOLVER=letsencrypt   # only needed if using Traefik (see below)
 ```
 
-**4. Point the dashboard Traefik route to your domain**
+**3. Update the dashboard route**
 
-Edit `demo/traefik/dynamic/dashboard.yml` and replace `pocket-hub.domain.com` with your actual domain:
+Edit `demo/traefik/dynamic/dashboard.yml` and replace the hostname with your actual domain:
 
 ```yaml
-http:
-  routers:
-    dashboard:
-      rule: "Host(`pocket-hub.domain.com`)"
-      ...
+rule: "Host(`pocket-hub.domain.com`)"
 ```
 
-**5. Start the stack**
+**4. Start the stack**
 
 ```bash
 docker compose -f demo/docker-compose.yml up -d
 ```
 
-**6. Open the dashboard**
+**5. Open the dashboard**
 
-Navigate to `https://pocket-hub.domain.com` and log in with the credentials from step 3.
+Go to `https://pocket-hub.domain.com`. From here you can create PocketBase instances — each one will be live at `https://<subdomain>.pocket-hub.domain.com` within seconds.
 
-You can now create PocketBase instances from the UI. Each instance will be reachable at `https://<subdomain>.pocket-hub.domain.com` within seconds.
+---
+
+## Reverse Proxy Setup
+
+The internal Traefik router listens on `127.0.0.1:8082` (HTTP only). Your public reverse proxy handles TLS termination and forwards all traffic matching `*.pocket-hub.domain.com` to port `8082`.
+
+### Option A — Traefik (recommended, works out of the box)
+
+If you already run Traefik as your public reverse proxy with Docker auto-discovery, the setup is zero-config: the labels in `docker-compose.yml` automatically register the routing rules and request a wildcard TLS certificate.
+
+**How it works:**
+- Your public Traefik watches the Docker socket for containers with `traefik.enable=true`
+- `pocket-hub-traefik` exposes labels that define the routing rule and cert resolver
+- Traefik reaches `pocket-hub-traefik` via the shared `traefik-public` Docker network
+
+**Requirements:**
+1. Your public Traefik must be connected to a Docker network named `traefik-public`:
+   ```bash
+   docker network create traefik-public
+   ```
+2. Your public Traefik must use the Docker provider (`--providers.docker=true`) with `exposedByDefault: false`
+3. Set `CERT_RESOLVER` in `demo/.env` to the name of your Let's Encrypt resolver (e.g. `letsencrypt`, `cloudflare`)
+
+The relevant label in `docker-compose.yml`:
+```yaml
+# Matches both pocket-hub.domain.com AND *.pocket-hub.domain.com in one rule
+- "traefik.http.routers.pocket-hub.rule=HostRegexp(`^([a-z0-9-]+\\.)?${APP_DOMAIN}$$`)"
+- "traefik.http.routers.pocket-hub.tls.certresolver=${CERT_RESOLVER}"
+- "traefik.http.services.pocket-hub.loadbalancer.server.port=8082"
+```
+
+The single `HostRegexp` rule covers the base domain and all subdomains — no need to add new rules when new instances are created.
+
+### Option B — Nginx
+
+Remove the `labels` block and `traefik-public` network from `demo/docker-compose.yml`, then add a server block:
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name pocket-hub.domain.com *.pocket-hub.domain.com;
+
+    ssl_certificate     /path/to/wildcard.crt;
+    ssl_certificate_key /path/to/wildcard.key;
+
+    location / {
+        proxy_pass http://127.0.0.1:8082;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+}
+```
+
+### Option C — Caddy
+
+```caddyfile
+*.pocket-hub.domain.com, pocket-hub.domain.com {
+    tls {
+        dns <your-dns-provider> <api-token>
+    }
+    reverse_proxy 127.0.0.1:8082
+}
+```
 
 ---
 
@@ -108,33 +154,88 @@ You can now create PocketBase instances from the UI. Each instance will be reach
 Browser
   │
   ▼
-Public reverse proxy (Traefik / Nginx / Caddy — your existing setup)
-  │  forwards *.pocket-hub.domain.com → 127.0.0.1:8082
+Public reverse proxy  (Traefik / Nginx / Caddy — TLS termination)
+  │  forwards *.pocket-hub.domain.com → pocket-hub-traefik:8082
+  │  [Traefik: via traefik-public network + auto-discovery labels]
+  │  [Nginx/Caddy: via 127.0.0.1:8082 port binding]
   ▼
-pocket-hub-traefik  (internal Traefik, port 8082)
-  │  routes by Host header using file provider (hot-reload)
+pocket-hub-traefik  (internal Traefik, HTTP only, port 8082)
+  │  routes by Host header using file provider (hot-reload ~1s)
   ├──▶  dashboard:3000          (pocket-hub.domain.com)
   └──▶  pb_<name>:8090          (<name>.pocket-hub.domain.com)
 
 dashboard  (Hono + Bun backend + React frontend)
   ├── reads/writes /instances/<name>/          (bind-mount)
-  ├── reads/writes /traefik/dynamic/<name>.yml (bind-mount)
-  ├── talks to Docker via socket-proxy (TCP)   (container management)
-  └── talks to Postgres directly               (DB provisioning)
+  ├── reads/writes /traefik/dynamic/<name>.yml (bind-mount → Traefik hot-reloads)
+  ├── talks to Docker via socket-proxy (TCP)   (start/stop/status containers)
+  └── talks to Postgres directly               (create/drop DBs and users)
 
 socket-proxy  (tecnativa/docker-socket-proxy)
-  └── exposes a filtered Docker API — no raw socket exposed to dashboard
+  └── filtered Docker API — dashboard never touches the raw socket
 
 pocket-hub-postgres  (Postgres 17)
-  └── one database pair per instance: pb-<name> + pb-<name>-logs
+  └── one DB pair per instance: pb-<name>  +  pb-<name>-logs
 ```
 
 **Key design decisions:**
 
-- **Subdomain routing** — PocketBase's admin UI hardcodes absolute paths (`/api/`, `/_/`), making path-prefix stripping impossible. Each instance gets its own subdomain.
-- **File provider for internal Traefik** — scripts write/delete `.yml` files; Traefik hot-reloads in ~1 second. No Docker label juggling.
-- **No DB drop on delete by default** — instance data is kept in Postgres after deletion unless you explicitly check the option in the UI.
-- **UID 1001** — the dashboard container runs as a non-root user so files created under `/instances/` are owned by the host user.
+- **Subdomain routing** — PocketBase's admin UI uses hardcoded absolute paths (`/api/`, `/_/`), making path-prefix stripping impossible. Each instance gets its own subdomain.
+- **File provider for internal Traefik** — `new-instance.sh` writes a `.yml` file; Traefik picks it up in ~1 second. No Docker API calls or label restarts needed.
+- **No DB drop by default** — Postgres data survives instance deletion unless you explicitly check the option in the delete dialog.
+- **UID 1001** — the dashboard container runs as a non-root user so files written to `/instances/` are owned by the host user and don't require sudo to manage.
+
+---
+
+## Instance Lifecycle & Ownership
+
+### The instance folder is the source of truth
+
+When an instance named `my-app` is created, the hub writes:
+
+```
+demo/instances/my-app/
+  ├── docker-compose.yml   # container definition
+  ├── .env                 # all instance configuration
+  └── pb-data/             # PocketBase local data (if any)
+
+demo/traefik/dynamic/my-app.yml   # Traefik routing for this instance
+```
+
+The folder name (`my-app`) is the permanent identifier used for:
+- The Docker container name (`pb_my-app`)
+- The Docker Compose project name
+- The Postgres user (`pb_my_app`) and databases (`pb-my-app`, `pb-my-app-logs`)
+- The Traefik config file name
+
+**Do not rename the folder.** The delete script and the container runtime all depend on this name being stable. If you need to rename, delete and recreate.
+
+### What you can change after creation
+
+Once an instance is running, the hub hands off control. You are free to:
+
+- **Edit `instances/<name>/.env`** — add custom environment variables, change PocketBase settings like `PB_HTTP_ADDR`. Restart the container to apply (`docker compose -f instances/<name>/docker-compose.yml restart`).
+- **Edit `traefik/dynamic/<name>.yml`** — add extra Traefik middlewares (rate limiting, headers, IP allowlists). Traefik hot-reloads within ~1 second, no restart needed.
+- **Configure PocketBase from its admin UI** (`https://<subdomain>.domain.com/_/`) — manage collections, auth providers, hooks, API rules. These changes are stored in Postgres and persist independently.
+
+### What you must NOT change after creation
+
+- **`POSTGRES_URL`, `POSTGRES_DATA_DB`, `POSTGRES_AUX_DB`** in the instance `.env` — these values match the databases that were created at provisioning time. Changing them will cause PocketBase to fail to start, and the delete script will be unable to clean up correctly.
+- **The instance folder name** — see above.
+
+---
+
+## Dashboard Authentication
+
+HTTP Basic Auth is **enabled by default** and **optional**.
+
+| `DASHBOARD_USER` value | Behavior |
+|---|---|
+| Non-empty string (default: `admin`) | Basic Auth is enforced on all `/api/*` routes |
+| Empty string or not set | Auth is disabled — all requests pass through without credentials |
+
+To disable auth, set `DASHBOARD_USER=` (empty) in `demo/.env`.
+
+> Even with auth disabled, the dashboard should only be accessible over HTTPS and ideally restricted by network/firewall if exposed publicly.
 
 ---
 
@@ -146,131 +247,118 @@ pocketbase-hub/
 ├── Dockerfile                   # Multi-stage build (Node → Bun runtime)
 │
 ├── backend/                     # Hono server (Bun)
-│   ├── index.ts                 # App entry point, static file serving, auth middleware
+│   ├── index.ts                 # Entry point, static file serving, auth setup
 │   ├── middleware/
-│   │   └── auth.ts              # HTTP Basic Auth middleware
+│   │   └── auth.ts              # HTTP Basic Auth — no-op if DASHBOARD_USER is empty
 │   ├── routes/
-│   │   └── instances.ts         # GET/POST/DELETE /api/instances, GET /api/config
-│   └── scripts.ts               # Generic shell script runner via Bun.spawn
+│   │   └── instances.ts         # GET /api/config, GET/POST/DELETE /api/instances
+│   └── scripts.ts               # Shell script runner via Bun.spawn
 │
 ├── frontend/                    # React + Vite (TypeScript)
 │   └── src/
-│       ├── api.ts               # Typed fetch wrappers for all API calls
-│       ├── App.tsx              # Root component with instance list + modals
+│       ├── api.ts               # Typed fetch wrappers
+│       ├── App.tsx              # Root component
 │       └── components/
-│           ├── InstanceCard     # Card with status badge, URL link, delete button
-│           ├── CreateModal      # New instance form (name, subdomain, admin credentials)
-│           └── DeleteModal      # Confirm delete with optional DB drop checkbox
+│           ├── InstanceCard     # Status badge, URL link, delete button
+│           ├── CreateModal      # Form: name, subdomain, admin email, admin password
+│           └── DeleteModal      # Confirm delete + optional DB drop checkbox
 │
-├── config/                      # Baked into the image at /config/; mountable for customization
+├── config/                      # Baked into /config/ in the image; mountable for customization
 │   ├── scripts/
-│   │   ├── new-instance.sh      # Creates instance: dir, .env, Traefik yml, PG DBs, container
-│   │   ├── delete-instance.sh   # Stops container, removes dir + Traefik yml, optionally drops DBs
-│   │   └── list-instances.sh    # Lists /instances/, outputs [{name, subdomain}] JSON array
+│   │   ├── new-instance.sh      # Full provisioning: dir, .env, Traefik yml, PG DBs, container, superuser
+│   │   ├── delete-instance.sh   # Teardown: stop container, remove dir + Traefik yml, optional DB drop
+│   │   └── list-instances.sh    # Scan /instances/, output [{name, subdomain}] JSON
 │   └── templates/
 │       ├── instance/
-│       │   ├── docker-compose.yml   # Template for each PocketBase container
-│       │   └── .env                 # Template for each instance's environment file
+│       │   ├── docker-compose.yml
+│       │   └── .env
 │       └── traefik/
-│           └── dynamic.yml          # Template for each instance's Traefik routing config
+│           └── dynamic.yml
 │
 └── demo/                        # Ready-to-run stack
     ├── .env.example             # Copy to .env and fill in values
-    ├── docker-compose.yml       # Full stack: Postgres, socket-proxy, Traefik, dashboard
-    ├── instances/               # Runtime dir — populated by the dashboard (bind-mounted)
+    ├── docker-compose.yml       # Postgres 17 + socket-proxy + Traefik + dashboard
+    ├── instances/               # Runtime — populated by the dashboard (bind-mounted)
     └── traefik/
         └── dynamic/
-            └── dashboard.yml    # Static route for the dashboard itself
+            └── dashboard.yml    # Static Traefik route for the dashboard itself
 ```
 
 ---
 
 ## Configuration Reference
 
-All configuration is done via environment variables passed to the `dashboard` container.
+Environment variables for the `dashboard` container:
 
 | Variable | Default | Description |
 |---|---|---|
-| `APP_DOMAIN` | `localhost` | Base domain. Instances are routed at `<subdomain>.<APP_DOMAIN>`. |
-| `APP_SCHEME` | `https` | URL scheme shown in the dashboard (`http` or `https`). |
-| `DASHBOARD_USER` | `admin` | HTTP Basic Auth username for the dashboard. |
-| `DASHBOARD_PASS` | `changeme` | HTTP Basic Auth password for the dashboard. |
-| `POSTGRES_HOST` | `postgres` | Hostname of the PostgreSQL 17 server. |
-| `POSTGRES_USER` | `postgres` | PostgreSQL superuser used for provisioning. |
+| `APP_DOMAIN` | `localhost` | Base domain. Instances are at `<subdomain>.<APP_DOMAIN>`. |
+| `APP_SCHEME` | `https` | URL scheme shown in the UI (`http` or `https`). |
+| `DASHBOARD_USER` | `admin` | Basic Auth username. Empty = auth disabled. |
+| `DASHBOARD_PASS` | `changeme` | Basic Auth password. |
+| `POSTGRES_HOST` | `postgres` | PostgreSQL 17 hostname. |
+| `POSTGRES_USER` | `postgres` | Postgres superuser for provisioning. |
 | `POSTGRES_PASSWORD` | _(empty)_ | Password for `POSTGRES_USER`. |
-| `INSTANCES_DIR` | `/instances` | Host path where instance directories are created. |
-| `TRAEFIK_DYNAMIC_DIR` | `/traefik/dynamic` | Path where Traefik file provider watches for route configs. |
-| `TEMPLATES_DIR` | `/config/templates` | Path to instance and Traefik YAML templates. |
-| `SCRIPTS_DIR` | `/config/scripts` | Path to provisioning shell scripts. |
+| `INSTANCES_DIR` | `/instances` | Where instance directories are created. |
+| `TRAEFIK_DYNAMIC_DIR` | `/traefik/dynamic` | Where Traefik file provider watches for routes. |
+| `TEMPLATES_DIR` | `/config/templates` | Path to instance and Traefik templates. |
+| `SCRIPTS_DIR` | `/config/scripts` | Path to provisioning scripts. |
 | `DOCKER_HOST` | _(empty)_ | Docker API endpoint, e.g. `tcp://socket-proxy:2375`. |
-| `PORT` | `3000` | Port the dashboard HTTP server listens on. |
+| `PORT` | `3000` | Dashboard HTTP port. |
 
 ---
 
 ## Templates & Placeholders
 
-When a new instance is created, the scripts render the templates by substituting placeholders with `sed`. You can override the templates at runtime by mounting a volume to `/config/templates`.
+Scripts render templates with `sed` substitution. Mount a volume over `/config/templates` to customize without rebuilding.
 
 ### `config/templates/instance/docker-compose.yml`
 
-Defines the PocketBase container for each instance.
-
 | Placeholder | Value |
 |---|---|
-| `__PROJECT_NAME__` | Internal instance name (used for container name `pb_<name>`, compose project) |
-| `__SUBDOMAIN__` | Public subdomain (used in comments / future use) |
+| `__PROJECT_NAME__` | Instance name → container name `pb_<name>`, compose project |
+| `__SUBDOMAIN__` | Public subdomain |
 | `__APP_DOMAIN__` | Base domain |
 
 ### `config/templates/instance/.env`
 
-Environment file passed to the PocketBase container via `env_file`.
-
 | Placeholder | Value |
 |---|---|
 | `__PROJECT_NAME__` | Instance name |
-| `__SUBDOMAIN__` | Public subdomain — stored here so `list-instances.sh` can read it back |
+| `__SUBDOMAIN__` | Subdomain — **stored here as source of truth for `list-instances.sh`** |
 | `__APP_DOMAIN__` | Base domain |
 | `__POSTGRES_HOST__` | PostgreSQL hostname |
-| `__PB_DB_USER__` | Postgres user created for this instance (`pb_<name>`) |
-| `__PB_DB_PASSWORD__` | Randomly generated password for the Postgres user |
-| `__PB_DATA_DB__` | Main database name (`pb-<name>`) |
-| `__PB_AUX_DB__` | Logs database name (`pb-<name>-logs`) |
+| `__PB_DB_USER__` | Postgres user (`pb_<name>`) |
+| `__PB_DB_PASSWORD__` | Randomly generated password |
+| `__PB_DATA_DB__` | Main DB (`pb-<name>`) — **do not change after creation** |
+| `__PB_AUX_DB__` | Logs DB (`pb-<name>-logs`) — **do not change after creation** |
 
 ### `config/templates/traefik/dynamic.yml`
 
-Traefik HTTP router + service for each instance. Written to `/traefik/dynamic/<name>.yml` and picked up by Traefik's file provider automatically.
-
 | Placeholder | Value |
 |---|---|
-| `__PROJECT_NAME__` | Instance name — used for router/middleware/service names |
-| `__SUBDOMAIN__` | Public subdomain — used in `Host()` routing rules |
+| `__PROJECT_NAME__` | Used for router / middleware / service names |
+| `__SUBDOMAIN__` | Used in `Host()` rules |
 | `__APP_DOMAIN__` | Base domain |
 
-The template creates:
-- A router matching `<subdomain>.<APP_DOMAIN>` on port 8082
-- A redirect middleware: bare `/` → `/_/` (PocketBase admin UI)
-- A service pointing to `http://pb_<name>:8090`
+Creates: a router matching `<subdomain>.<APP_DOMAIN>`, a `/` → `/_/` redirect middleware, and a service pointing to `http://pb_<name>:8090`.
 
 ---
 
 ## Scripts Reference
 
-Scripts live at `/config/scripts/` inside the image and are called by the backend via `Bun.spawn`. They read configuration from environment variables inherited from the dashboard container.
-
 ### `new-instance.sh <name>`
-
-Provisions a complete PocketBase instance:
 
 1. Creates `$INSTANCES_DIR/<name>/` from templates
 2. Writes `$TRAEFIK_DYNAMIC_DIR/<name>.yml`
-3. Creates a dedicated Postgres user and two databases (`pb-<name>`, `pb-<name>-logs`)
-4. Starts the container with `docker compose up -d`
-5. Waits for PocketBase to respond on `/api/health`
-6. Inserts a superuser directly into the `_superusers` table via psql (bcrypt hash generated with `Bun.password.hash`)
-7. Deletes the default `__pbinstaller@example.com` account created by the image
-8. Prints a JSON line to stdout: `{"adminEmail":"...","adminPassword":"..."}`
+3. Creates Postgres user + two databases
+4. Starts container with `docker compose up -d`
+5. Waits for PocketBase `/api/health` (checked from the dashboard container via the shared `pb_network`)
+6. Creates a superuser directly in `_superusers` via psql (bcrypt hash via `Bun.password.hash`)
+7. Removes the default `__pbinstaller@example.com` account
+8. Prints `{"adminEmail":"...","adminPassword":"..."}` to stdout for the API response
 
-**Overridable via env vars:**
+**Optional env overrides:**
 
 | Variable | Default |
 |---|---|
@@ -280,18 +368,16 @@ Provisions a complete PocketBase instance:
 
 ### `delete-instance.sh <name> [--drop-dbs]`
 
-Tears down an instance:
-
-1. Runs `docker compose down` on the instance
-2. Removes `$INSTANCES_DIR/<name>/` (including any local `pb-data/`)
+1. `docker compose down` the instance
+2. Removes `$INSTANCES_DIR/<name>/`
 3. Removes `$TRAEFIK_DYNAMIC_DIR/<name>.yml`
-4. If `--drop-dbs` is passed: drops `pb-<name>`, `pb-<name>-logs`, and the Postgres user
+4. With `--drop-dbs`: also drops both Postgres databases and the user
 
-> Without `--drop-dbs`, Postgres data is kept and can be recovered by recreating an instance with the same name.
+Without `--drop-dbs`, the databases are kept — recreating an instance with the same name will reuse the existing data.
 
 ### `list-instances.sh`
 
-Scans `$INSTANCES_DIR/`, reads the `SUBDOMAIN=` line from each instance's `.env`, and outputs a JSON array:
+Scans `$INSTANCES_DIR/`, reads `SUBDOMAIN=` from each `.env`, outputs:
 
 ```json
 [{"name":"my-app","subdomain":"myapp"},{"name":"blog","subdomain":"blog"}]
@@ -301,16 +387,16 @@ Scans `$INSTANCES_DIR/`, reads the `SUBDOMAIN=` line from each instance's `.env`
 
 ## API Reference
 
-All endpoints require HTTP Basic Auth.
+All endpoints require HTTP Basic Auth (if `DASHBOARD_USER` is set).
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/api/config` | Returns `{ domain, scheme }` — used by the frontend form |
-| `GET` | `/api/instances` | Returns array of `{ name, subdomain, status, url }` |
-| `POST` | `/api/instances` | Creates a new instance (see body below) |
-| `DELETE` | `/api/instances/:name?dropDbs=true` | Deletes an instance; add `?dropDbs=true` to also drop Postgres DBs |
+| `GET` | `/api/config` | Returns `{ domain, scheme }` |
+| `GET` | `/api/instances` | Returns `[{ name, subdomain, status, url }]` |
+| `POST` | `/api/instances` | Creates a new instance |
+| `DELETE` | `/api/instances/:name` | Deletes an instance. Add `?dropDbs=true` to also drop Postgres DBs |
 
-**POST `/api/instances` body:**
+**POST body:**
 
 ```json
 {
@@ -321,7 +407,7 @@ All endpoints require HTTP Basic Auth.
 }
 ```
 
-`subdomain`, `adminEmail`, and `adminPassword` are optional — sensible defaults are applied if omitted.
+`subdomain`, `adminEmail`, `adminPassword` are optional — defaults are applied if omitted.
 
 ---
 
@@ -331,18 +417,16 @@ All endpoints require HTTP Basic Auth.
 docker build -t pocket-base-hub:latest .
 ```
 
-The Dockerfile is a two-stage build:
-1. **`node:20-alpine`** — builds the React frontend with Vite
-2. **`oven/bun:1-alpine`** — runtime with `bash`, `openssl`, `postgresql16-client`, `docker-cli`, `docker-cli-compose`
-
-The built frontend is served as static files directly from the Bun server.
+Two-stage build:
+1. **`node:20-alpine`** — builds the React/Vite frontend
+2. **`oven/bun:1-alpine`** — runtime, installs `bash`, `openssl`, `postgresql16-client`, `docker-cli`, `docker-cli-compose`
 
 ---
 
-## Production Deployment Notes
+## Production Notes
 
-- **PostgreSQL 17 is required.** The `fondoger/pocketbase` image uses `json_query(jsonb, text)` which was added in PG17. Do not use PG16 or earlier.
-- **Wildcard certificate.** Your public reverse proxy needs a wildcard cert for `*.pocket-hub.domain.com`. With Traefik + Let's Encrypt this is done via DNS-01 challenge.
-- **`traefik-public` network.** The internal Traefik container joins this network so your public Traefik can reach `pocket-hub-traefik:8082` by container name. If you use a different reverse proxy, remove this network from `docker-compose.yml` and forward traffic to the exposed `127.0.0.1:8082` port instead.
-- **UID 1001.** The dashboard runs as `user: 1001:1001`. Files written under `demo/instances/` will be owned by that UID. Adjust in `docker-compose.yml` if your host user has a different UID (`id -u`).
-- **Customizing scripts and templates.** Mount a volume over `/config/scripts` or `/config/templates` to override provisioning behavior without rebuilding the image.
+- **PostgreSQL 17 required.** `fondoger/pocketbase` uses `json_query(jsonb, text)` added in PG17.
+- **Wildcard TLS certificate.** Your reverse proxy needs a cert covering `*.pocket-hub.domain.com`. With Traefik + Let's Encrypt, use DNS-01 challenge (required for wildcards).
+- **UID 1001.** Adjust `user:` in `docker-compose.yml` to match your host user UID (`id -u`).
+- **Customizing without rebuilding.** Mount volumes over `/config/scripts` or `/config/templates` to override provisioning behavior.
+- **Superuser credentials** are shown once in the UI after instance creation and are not stored anywhere by the hub. Save them immediately.
