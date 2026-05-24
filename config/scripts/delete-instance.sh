@@ -69,6 +69,12 @@ if [ "$DROP_DBS" = "true" ]; then
   PGPASSWORD="$POSTGRES_PASSWORD" psql \
     -h "$POSTGRES_HOST" -U "$POSTGRES_USER" -d postgres \
     -v ON_ERROR_STOP=1 <<SQL
+-- Terminate all active connections to both databases before dropping
+SELECT pg_terminate_backend(pid)
+  FROM pg_stat_activity
+  WHERE datname IN ('${PB_DATA_DB}', '${PB_AUX_DB}')
+    AND pid <> pg_backend_pid();
+
 DROP DATABASE IF EXISTS "${PB_DATA_DB}" WITH (FORCE);
 DROP DATABASE IF EXISTS "${PB_AUX_DB}" WITH (FORCE);
 DROP USER IF EXISTS "${PB_DB_USER}";
