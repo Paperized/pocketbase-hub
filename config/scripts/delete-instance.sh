@@ -68,9 +68,9 @@ if [ "$DROP_DBS" = "true" ]; then
   echo "→ Dropping Postgres databases" >&2
   PGPASSWORD="$POSTGRES_PASSWORD" psql \
     -h "$POSTGRES_HOST" -U "$POSTGRES_USER" -d postgres \
-    -v ON_ERROR_STOP=0 <<SQL
-DROP DATABASE IF EXISTS "${PB_DATA_DB}";
-DROP DATABASE IF EXISTS "${PB_AUX_DB}";
+    -v ON_ERROR_STOP=1 <<SQL
+DROP DATABASE IF EXISTS "${PB_DATA_DB}" WITH (FORCE);
+DROP DATABASE IF EXISTS "${PB_AUX_DB}" WITH (FORCE);
 DROP USER IF EXISTS "${PB_DB_USER}";
 SQL
   echo "  Databases dropped" >&2
